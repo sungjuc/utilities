@@ -14,7 +14,6 @@ cd ${HOST}
 if [[ ${OPT} == "gz" ]]
 then 
   scp scho@${HOST}:/${LOG_DIR}${LOG_NAME}${LOG_GZ} .
-  ../file_process.sh
   cd ..
 else
   scp scho@${HOST}:/${LOG_DIR}${LOG_NAME} .
