@@ -45,6 +45,10 @@ public class LogStorage {
     return true;
   }
 
+  public String currentFile() {
+    return fileList[currentFile].getName();
+  }
+
   public String readLine() throws IOException {
     if(!hasRead) {
       System.out.println(currentFile + 1 + "/" + fileList.length + " file: " + fileList[currentFile].getName());

@@ -1,8 +1,11 @@
 package com.linkedin;
 
 import java.io.BufferedReader;
+import java.io.BufferedWriter;
 import java.io.File;
+import java.io.FileNotFoundException;
 import java.io.FileReader;
+import java.io.FileWriter;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.PrintStream;
@@ -26,24 +29,33 @@ public class Main {
     test();
   }
 
-  public static void mssh(LogData logData, String dateTime)
+  public static void mssh(LogData logData, List<String> dateTimeList, BufferedWriter outFileWriter)
       throws IOException, InterruptedException {
-    System.out.println(String.format("[mssh] logData.treeId = %s, dataTime = %s", logData.treeId, dateTime));
+    System.out.println(
+        String.format("[mssh] logData.treeId = %s, dataTime = %s", logData.treeId, dateTimeList.toString()));
     counter++;
     String fileName = "tmp/result" + counter + ".txt";
-    Process p = Runtime.getRuntime().exec("./test_runner.sh " + logData.treeId + " " + dateTime + " " + fileName);
-    PrintStream out = new PrintStream(p.getOutputStream());
-    BufferedReader in = new BufferedReader(new InputStreamReader(p.getInputStream()));
-    while (in.ready()) {
-      String s = in.readLine();
-      System.out.println(s);
+    for (String dateTime : dateTimeList) {
+
+      Process p = Runtime.getRuntime().exec("./test_runner.sh " + logData.treeId + " " + dateTime + " " + fileName);
+      PrintStream out = new PrintStream(p.getOutputStream());
+      BufferedReader in = new BufferedReader(new InputStreamReader(p.getInputStream()));
+      while (in.ready()) {
+        String s = in.readLine();
+        System.out.println(s);
+      }
+      out.println("exit");
+
+      p.waitFor();
+
+      System.out.println("done");
     }
-    out.println("exit");
 
-    p.waitFor();
+    postProcessing(fileName, logData, outFileWriter);
+  }
 
-    System.out.println("done");
-
+  public static void postProcessing(String fileName, LogData logData, BufferedWriter outFileWriter)
+      throws IOException {
     //post processing
     File report = new File(fileName);
     List<LogData> tempResult = new ArrayList<LogData>();
@@ -55,28 +67,22 @@ public class Main {
       Matcher matcher = Common.pattern.matcher(line);
       if (matcher.find()) {
         try {
-          LogData data = new LogData(matcher);
-          tempResult.add(data);
+          LogData data = new LogData(matcher, line);
+          if (!data.isDarkTraffic() && !data.host.equals(logData.host)) {
+            tempResult.add(data);
+          }
         } catch (Exception e) {
 
         }
       }
     }
+    reader.close();
     report.delete();
 
     if (tempResult.size() > 1) {
-      System.out.println("=======================================================");
-      Collections.sort(tempResult);
-      System.out.println("result size: " + tempResult.size());
-      System.out.println("-----------------------------------------------------");
-      for (LogData data : tempResult) {
-        System.out.println(data.topCaller);
-        System.out.println(data.pageKey);
-        System.out.println(data.callStacks);
-        System.out.println(data.api);
-        System.out.println("-----------------------------------------------------");
-      }
-      System.out.println("=======================================================");
+      Result result = new Result(tempResult);
+      outFileWriter.write(result.toString());
+      outFileWriter.flush();
     }
   }
 
@@ -89,17 +95,54 @@ public class Main {
     System.out.println("HEy");
     FileListFilter dummy = new FileListFilter();
     LogStorage logStorage = new LogStorage("lor1-app6139.prod/", dummy);
+    String outFileDate = "";
+
+    BufferedWriter outFileWriter = null;
 
     String line = null;
     while ((line = logStorage.readLine()) != null) {
       Matcher matcher = Common.pattern.matcher(line);
       if (matcher.matches()) {
-        LogData logData = new LogData(matcher);
+        LogData logData = new LogData(matcher, line);
+        if (logData.isDarkTraffic()) {
+          System.out.println("XXX DarkTraffic" + logData.originalLog);
+          continue;
+        }
         String newDate = logData.date.substring(0, logData.date.indexOf(":"));
         newDate = newDate.replaceAll("/", "-");
         newDate = newDate.replaceAll(" ", "-");
-        mssh(logData, newDate);
+        String originalDate = logStorage.currentFile().substring(logStorage.currentFile().lastIndexOf(".") + 1);
+        List<String> inputDateList = new LinkedList<String>();
+        inputDateList.add(newDate);
+
+        if (!originalDate.equals(newDate)) {
+          inputDateList.add(originalDate);
+        }
+
+        if (!outFileDate.equals(originalDate)) {
+          outFileDate = originalDate;
+          if (outFileWriter != null) {
+            outFileWriter.flush();
+            outFileWriter.close();
+          }
+
+          File outFile = new File("report/result_" + originalDate);
+
+          if (outFile.exists()) {
+            outFile.delete();
+          }
+
+          outFile.createNewFile();
+
+          outFileWriter = new BufferedWriter(new FileWriter(outFile));
+        }
+
+        mssh(logData, inputDateList, outFileWriter);
       }
+    }
+    if (outFileWriter != null) {
+      outFileWriter.flush();
+      outFileWriter.close();
     }
   }
 }
